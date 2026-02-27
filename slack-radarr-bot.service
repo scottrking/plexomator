@@ -1,0 +1,20 @@
+[Unit]
+Description=Slack Radarr Bot
+After=network.target radarr.service
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/opt/slack-radarr-bot
+EnvironmentFile=/opt/slack-radarr-bot/.env
+ExecStart=/opt/slack-radarr-bot/venv/bin/python3 /opt/slack-radarr-bot/slack_radarr_bot.py
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=slack-radarr-bot
+
+[Install]
+WantedBy=multi-user.target
