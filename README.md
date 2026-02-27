@@ -217,10 +217,6 @@ sudo journalctl -u slack-radarr-bot -n 50
 ## Roadmap
 
 - [ ] Sonarr integration for TV shows
-- [ ] Google Sheets logging
-- [ ] User permissions/roles
-- [ ] Statistics tracking
-- [ ] Multi-server support
 
 ## Contributing
 
