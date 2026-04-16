@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Slack Bot for Radarr Integration - v3 with Interactive Buttons
+Slack Bot for Radarr Integration - v4 with Link Movie Feature
 Monitors Slack channels for movie posts and adds them to Radarr automatically.
 Also allows users to request movies via Slack commands with interactive button selection.
+Includes /linkmovie command to post TMDB links without adding to Radarr.
 """
 
 import os
@@ -169,6 +170,27 @@ class RadarrClient:
 # Initialize clients
 tmdb = TMDBClient(TMDB_API_KEY) if TMDB_API_KEY else None
 radarr = RadarrClient(RADARR_URL, RADARR_API_KEY)
+
+def get_channel_id(body: Optional[Dict[str, Any]] = None, command: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """
+    Safely extract a channel ID from Slack payloads.
+
+    Slash commands typically provide command['channel_id'].
+    Interactive payloads often provide body['channel']['id'] or body['container']['channel_id'].
+    """
+    if command and command.get('channel_id'):
+        return command['channel_id']
+
+    if body:
+        channel = body.get('channel')
+        if isinstance(channel, dict) and channel.get('id'):
+            return channel['id']
+
+        container = body.get('container')
+        if isinstance(container, dict) and container.get('channel_id'):
+            return container['channel_id']
+
+    return None
 
 
 def extract_movie_info(text: str) -> Optional[Dict[str, Any]]:
@@ -390,7 +412,7 @@ def handle_add_movie_button(ack, action, respond, body):
     
     # Get user info
     user_id = body['user']['id']
-    channel_id = body['channel']['id']
+    channel_id = get_channel_id(body=body)
     
     # Get movie details for the channel message
     movie_data = radarr.search_movie(tmdb_id)
@@ -450,6 +472,205 @@ def handle_add_movie_button(ack, action, respond, body):
             )
         except Exception as e:
             logger.error(f"Could not post to channel: {e}")
+
+
+# Link movie command - post TMDB link without adding to Radarr
+@app.command("/linkmovie")
+def handle_link_movie(ack, command, respond, body):
+    """Post TMDB link to channel without adding to Radarr"""
+    ack()
+    
+    text = command.get('text', '').strip()
+    channel_id = get_channel_id(body=body, command=command)
+    
+    if not text:
+        respond("⚠️ Please provide a movie title or TMDB ID.\nExample: `/linkmovie The Matrix`")
+        return
+    
+    # Check if TMDB ID provided directly
+    movie_info = extract_movie_info(text)
+    
+    if movie_info:
+        # Direct TMDB ID - post link immediately
+        tmdb_id = movie_info['tmdb_id']
+        try:
+            # Get movie details for nice formatting
+            movie_data = radarr.search_movie(tmdb_id)
+            
+            if movie_data:
+                title = movie_data.get('title', 'Unknown')
+                year = movie_data.get('year', 'Unknown')
+                
+                # Get director info
+                director_text = ""
+                if tmdb:
+                    try:
+                        credits_response = requests.get(
+                            f"{tmdb.base_url}/movie/{tmdb_id}/credits",
+                            params={"api_key": tmdb.api_key},
+                            timeout=10
+                        )
+                        if credits_response.status_code == 200:
+                            crew = credits_response.json().get("crew", [])
+                            directors = [person['name'] for person in crew if person.get('job') == 'Director']
+                            
+                            if directors:
+                                if len(directors) == 1:
+                                    director_text = f" • Directed by {directors[0]}"
+                                elif len(directors) == 2:
+                                    director_text = f" • Directed by {directors[0]} and {directors[1]}"
+                                else:
+                                    director_text = f" • Directed by {', '.join(directors[:-1])} and {directors[-1]}"
+                    except Exception as e:
+                        logger.error(f"Error fetching director: {e}")
+                
+                app.client.chat_postMessage(
+                    channel=channel_id,
+                    text=f"*{title}* ({year}){director_text}\nhttps://www.themoviedb.org/movie/{tmdb_id}"
+                )
+                respond("✅ Posted link to channel", response_type="ephemeral")
+            else:
+                app.client.chat_postMessage(
+                    channel=channel_id,
+                    text=f"https://www.themoviedb.org/movie/{tmdb_id}"
+                )
+                respond("✅ Posted link to channel", response_type="ephemeral")
+        except Exception as e:
+            logger.error(f"Error posting to channel: {e}")
+            respond("❌ Failed to post to channel")
+        return
+    
+    # No TMDB ID - search for movie
+    if not tmdb:
+        respond("⚠️ TMDB search is not configured. Please provide a TMDB ID.\nExample: `/linkmovie TMDB: 603`")
+        return
+    
+    results = tmdb.search_movies(text, limit=5)
+    
+    if not results:
+        respond(f"❌ No movies found for '{text}'. Try a different search term.")
+        return
+    
+    # Show results with buttons to post link
+    blocks = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*Select a movie to post link:*"
+            }
+        },
+        {"type": "divider"}
+    ]
+    
+    for movie in results:
+        title = movie.get('title', 'Unknown')
+        year = movie.get('release_date', '')[:4] if movie.get('release_date') else 'Unknown'
+        tmdb_id = movie.get('id')
+        director = movie.get('director', 'Director unknown')
+        
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*{title}* ({year}) • TMDB: {tmdb_id}\n_{director}_"
+            },
+            "accessory": {
+                "type": "button",
+                "text": {
+                    "type": "plain_text",
+                    "text": "Post Link"
+                },
+                "style": "primary",
+                "value": str(tmdb_id),
+                "action_id": f"post_link_{tmdb_id}"
+            }
+        })
+    
+    blocks.append({"type": "divider"})
+    blocks.append({
+        "type": "context",
+        "elements": [
+            {
+                "type": "mrkdwn",
+                "text": "💡 This posts the TMDB link without adding to Radarr"
+            }
+        ]
+    })
+    
+    respond({
+        "text": "Select a movie to post link",
+        "blocks": blocks
+    })
+
+
+# Handle "Post Link" button clicks
+@app.action(re.compile(r"post_link_(\d+)"))
+def handle_post_link_button(ack, action, respond, body):
+    """Handle when user clicks 'Post Link' button"""
+    ack()
+    
+    # Extract TMDB ID from action_id
+    tmdb_id = int(action['value'])
+    channel_id = get_channel_id(body=body)
+    user_id = body['user']['id']
+    
+    # Get movie details for nice formatting
+    movie_data = radarr.search_movie(tmdb_id)
+    
+    if movie_data:
+        title = movie_data.get('title', 'Unknown')
+        year = movie_data.get('year', 'Unknown')
+        
+        # Get director info
+        director_text = ""
+        if tmdb:
+            try:
+                credits_response = requests.get(
+                    f"{tmdb.base_url}/movie/{tmdb_id}/credits",
+                    params={"api_key": tmdb.api_key},
+                    timeout=10
+                )
+                if credits_response.status_code == 200:
+                    crew = credits_response.json().get("crew", [])
+                    directors = [person['name'] for person in crew if person.get('job') == 'Director']
+                    
+                    if directors:
+                        if len(directors) == 1:
+                            director_text = f" • Directed by {directors[0]}"
+                        elif len(directors) == 2:
+                            director_text = f" • Directed by {directors[0]} and {directors[1]}"
+                        else:
+                            director_text = f" • Directed by {', '.join(directors[:-1])} and {directors[-1]}"
+            except Exception as e:
+                logger.error(f"Error fetching director: {e}")
+        
+        # Post to channel
+        try:
+            app.client.chat_postMessage(
+                channel=channel_id,
+                text=f"*{title}* ({year}){director_text}\nhttps://www.themoviedb.org/movie/{tmdb_id}"
+            )
+            
+            # Update ephemeral message
+            respond(
+                text="✅ Posted link to channel",
+                replace_original=True,
+                response_type="ephemeral"
+            )
+        except Exception as e:
+            logger.error(f"Error posting to channel: {e}")
+            respond(
+                text="❌ Failed to post to channel",
+                replace_original=True,
+                response_type="ephemeral"
+            )
+    else:
+        respond(
+            text="❌ Could not fetch movie details",
+            replace_original=True,
+            response_type="ephemeral"
+        )
 
 
 # App mention handler - allows users to @mention the bot
@@ -518,7 +739,7 @@ if __name__ == "__main__":
     if not TMDB_API_KEY:
         logger.warning("TMDB_API_KEY not set. Search functionality will be disabled.")
     
-    logger.info("Starting Slack Radarr Bot v3...")
+    logger.info("Starting Slack Radarr Bot v4...")
     logger.info(f"Radarr URL: {RADARR_URL}")
     logger.info(f"Monitored Channel ID: {MONITORED_CHANNEL}")
     logger.info(f"TMDB Search: {'Enabled' if TMDB_API_KEY else 'Disabled'}")
