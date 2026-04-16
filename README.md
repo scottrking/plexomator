@@ -45,6 +45,10 @@ User: /linkmovie All the President's Men
 Bot shows:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 All the President's Men (1976) • Directed by Alan J. Pakula
+[Post This] ← Click to add
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Channel sees: All the President's Men (1976) • Directed by Alan J. Pakula
 https://www.themoviedb.org/movie/891
 ```
 
