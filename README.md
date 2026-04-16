@@ -13,6 +13,7 @@ A Slack bot that automatically adds movies to Radarr/Plex for movie clubs. Featu
 👥 **Channel Notifications** - Announces new movies with director info  
 ⚡ **One-Click Adding** - No typing TMDB IDs or navigating Radarr  
 🤖 **Multiple Triggers** - Slash commands, @mentions, or channel posts  
+🔗 **Post a Link** – Grab a link from TMDB and post it to the channel
 
 ## How It Works
 
@@ -35,6 +36,16 @@ Directed by Lana Wachowski, Lilly Wachowski
 
 Channel sees:
 The Matrix (1999) • Directed by Lana Wachowski and Lilly Wachowski. Added to Plex by @username.
+```
+
+### Post A Link
+```
+User: /linkmovie All the President's Men
+
+Bot shows:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+All the President's Men (1976) • Directed by Alan J. Pakula
+https://www.themoviedb.org/movie/891
 ```
 
 ## Prerequisites
